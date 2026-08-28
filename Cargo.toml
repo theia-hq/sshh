@@ -1,0 +1,26 @@
+[package]
+name = "sshh"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+# A keyless SSH server over an already-authenticated byte stream. Isolated from tightbeam so its heavy,
+# security-sensitive dependency tree (russh, ssh-key, pty-process) never lands in the tunnel binary.
+[dependencies]
+russh = "0.63"
+ssh-key = { version = "=0.7.0-rc.11", features = ["ed25519"] }
+pty-process = { version = "0.5.3", features = ["async", "tokio"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread"] }
+thiserror = "2"
+tracing = "0.1"
+libc = "0.2"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+wildcard_imports = "deny"
+std_instead_of_core = "warn"
+
+[lints.rust]
+unused_must_use = "deny"
