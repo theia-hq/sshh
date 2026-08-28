@@ -58,6 +58,10 @@ where
     let key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&host_seed));
     let config = std::sync::Arc::new(russh::server::Config {
         keys: vec![key],
+        // Offer ONLY `none` auth: the overlay already authenticated the peer, so ssh must not demand a
+        // second credential. Without this russh advertises publickey/password and the client, having no
+        // key, is refused before it ever reaches `none`.
+        methods: russh::MethodSet::from(&[russh::MethodKind::None][..]),
         ..Default::default()
     });
     // Join the two stream halves into one duplex for russh, then run the SSH session to completion.
@@ -144,6 +148,12 @@ impl Shell {
 
 impl Handler for Shell {
     type Error = russh::Error;
+
+    /// Accept `none` auth: the cap-gated overlay already authenticated the peer, so ssh owes no second
+    /// credential. russh's default rejects `none`, so this override is what makes sshh keyless.
+    async fn auth_none(&mut self, _user: &str) -> Result<russh::server::Auth, Self::Error> {
+        Ok(russh::server::Auth::Accept)
+    }
 
     async fn channel_open_session(
         &mut self,
