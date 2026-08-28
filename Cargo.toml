@@ -8,6 +8,9 @@ license = "MIT OR Apache-2.0"
 # A keyless SSH server over an already-authenticated byte stream. Isolated from tightbeam so its heavy,
 # security-sensitive dependency tree (russh, ssh-key, pty-process) never lands in the tunnel binary.
 [dependencies]
+# theia
+nauthy = { path = "../nauthy" }
+
 russh = "0.63"
 ssh-key = { version = "=0.7.0-rc.11", features = ["ed25519"] }
 pty-process = { version = "0.5.3", features = ["async", "tokio"] }

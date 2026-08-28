@@ -41,9 +41,18 @@ pub enum ServeError {
 /// Run one SSH connection over an already-authenticated, cap-gated stream: accept `none` auth and serve a
 /// pty shell. Returns when the client disconnects or the shell exits.
 ///
+/// Takes a [`nauthy::Admitted`] witness by reference: a keyless shell accepting `none` auth is safe ONLY
+/// behind a gate, so requiring the gate's un-forgeable proof makes "authorize before serve" a compile-time
+/// precondition, not a caller's discipline. The witness is not otherwise used.
+///
 /// Refuses to run as root by construction: a shell served to a cap-holder runs as this process's user, so
 /// running privileged would hand every cap-holder a root shell. Run the server unprivileged.
-pub async fn serve<W, R>(host_seed: [u8; 32], writer: W, reader: R) -> Result<(), ServeError>
+pub async fn serve<W, R>(
+    _admitted: &nauthy::Admitted,
+    host_seed: [u8; 32],
+    writer: W,
+    reader: R,
+) -> Result<(), ServeError>
 where
     W: AsyncWrite + Unpin + Send + 'static,
     R: AsyncRead + Unpin + Send + 'static,
