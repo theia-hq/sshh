@@ -116,6 +116,11 @@ where
     let running = russh::server::run_stream(config, stream, Shell::default())
         .await
         .map_err(ServeError::Handshake)?;
+    // russh spawns the SSH session on a DETACHED task the moment `run_stream` returns Ok; `running.await`
+    // only OBSERVES its completion, it does not drive it. So cancelling `serve` (dropping this future) does
+    // not abort an in-flight shell, it only stops us awaiting it: the shell runs until the client
+    // disconnects or exits. Not a leak (the shell is bounded by the caller's live-session cap), but the
+    // reason a session cannot be torn down mid-flight by dropping `serve`.
     running.await.map_err(ServeError::Session)?;
     Ok(())
 }
