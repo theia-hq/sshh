@@ -1,33 +1,49 @@
 # sshh
 
 An SSH server with no ssh keys to manage. You hand it one byte stream that has already been
-authenticated and encrypted, and it runs a real SSH session over it: a standard `ssh` or `scp` client
-gets a shell, and nobody sets up or rotates an ssh key.
+authenticated, and it runs a real SSH session over it: a standard `ssh` or `scp` client gets a shell, and
+nobody sets up or rotates an ssh key.
 
-The trick is that SSH's usual job of proving who you are is already done. `serve()` takes a stream that
-something upstream has mutually authenticated (by public key) and authorized. Because that peer is
-already proven, the server accepts SSH's `none` auth method and goes straight to a shell in a pty. This
-is the same shape as Tailscale SSH, which accepts `none` behind the WireGuard tunnel.
+**sshh does no authentication of its own.** That is the whole point, and it is the whole contract: proving
+who the peer is must already be done before the stream reaches `serve()`, and guaranteeing that is the
+CALLER's responsibility. Because the peer is already proven, the server accepts SSH's `none` auth method
+and goes straight to a shell in a pty. This is the same shape as Tailscale SSH, which accepts `none`
+behind the WireGuard tunnel.
+
+The contract is enforced by the type system, not left to good intentions. `serve()` demands a
+`nauthy::Admitted` witness: an un-forgeable proof that a gate has authorized this exact peer for this
+exact service. You cannot call `serve()` without one, so a keyless shell can never be handed out
+un-gated by accident.
 
 ```rust
-// `writer`/`reader` are the two halves of a stream a gate has already admitted.
-sshh::serve(host_seed, writer, reader).await?;
+// `admitted` is a gate's proof it authorized this peer; `writer`/`reader` are the two halves of the
+// already-authenticated stream. There is no way to obtain an `Admitted` without a gate having admitted.
+sshh::serve(&admitted, host_seed, writer, reader).await?;
 ```
+
+**The name.** An SSH server with no keys to hand out or rotate: authentication happened before the shell,
+so the login step falls away. The extra *h* is the *shh* of that: SSH gone quiet, nothing to set up and
+nothing to say.
 
 > Experimental. Serves a login shell (or `sh -c <command>`) in a pty; see "Not yet" below.
 
-## How it's reached
+## How it composes, and how it's used
 
-You do not point `sshh` at a socket yourself. It is reached through [tightbeam](https://github.com/theia-hq/tightbeam),
-which addresses machines by public key and gates who may connect. Expose a machine's shell as a
-capability-gated service:
+sshh is a library, not a server you run. It supplies the shell; something else supplies the gate that
+mints the `Admitted` witness. sshh knows nothing about that gate beyond the `Admitted` type, so any gate
+can drive it. In theia, two crates compose it:
 
-```sh
-tightbeam expose ssh=sshd: --gate cap
-```
+- [nauthy](https://github.com/theia-hq/nauthy) is the gate. It verifies a presented capability and, on
+  success, returns an `Admitted` witness for that peer and service. That witness is the key that unlocks
+  `serve()`.
+- [tightbeam](https://github.com/theia-hq/tightbeam) is the exposer. `tightbeam expose ssh=sshd:` runs the
+  accept loop: for each connection it gates the stream through nauthy, takes the `Admitted`, and calls
+  `sshh::serve` with it. A capability holder then reaches the shell with a normal ssh client, no ssh key
+  involved. It lives behind tightbeam's `ssh` feature.
 
-A holder of a capability link then reaches it with a normal ssh client (via tightbeam's `ProxyCommand`
-recipe), and lands in a shell. It runs behind tightbeam's `ssh` feature.
+So a real deployment reads as `tightbeam expose ssh=sshd:` (gated to your signet by default), but that is
+one example, not a dependency: hand `serve()` an authenticated stream and an `Admitted` from any gate and
+you have keyless SSH. You never point sshh at a socket yourself.
 
 `sshh` is its own crate because it pulls in a heavy dependency tree (`russh`, `ssh-key`, `pty-process`).
 Keeping it separate lets tunnel binaries that never serve a shell stay lean.
