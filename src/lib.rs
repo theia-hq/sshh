@@ -18,11 +18,47 @@
 //! (`window_change_request` needs a resize handle the current splice consumes), SFTP/scp, and per-user
 //! mapping (today the shell runs as this process's uid).
 
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use tokio::io::{self, AsyncRead, AsyncWrite, AsyncWriteExt as _};
 
 use pty_process::{Command, Size};
 use russh::server::{Handler, Msg, Session};
 use russh::{Channel, ChannelId};
+
+/// The maximum number of concurrent shells this process serves across ALL connections. A shell has no
+/// login of its own, so an admitted peer (or a leaked slip) could otherwise open unbounded channels and
+/// connections and fork-bomb the host, running arbitrary code as this uid. Past this cap a new shell
+/// request is refused (`channel_failure`); the ceiling is generous for real interactive/exec use and
+/// bounded against abuse. Node-wide, not per-connection, because a flood opens many connections.
+const MAX_LIVE_SHELLS: usize = 64;
+
+/// Live shell count across the whole process, reserved by [`ShellSlot`].
+static LIVE_SHELLS: AtomicUsize = AtomicUsize::new(0);
+
+/// An RAII reservation of one concurrent-shell slot. Held for the shell's whole lifetime (moved into the
+/// serving task) and released on drop — including every early return before the task is spawned — so the
+/// count can never leak a slot and wedge the cap shut.
+struct ShellSlot;
+
+impl ShellSlot {
+    /// Reserve a slot, or `None` if the process is already at [`MAX_LIVE_SHELLS`]. The reserve-then-check
+    /// (fetch_add, roll back if over) is race-free under concurrent connections.
+    fn acquire() -> Option<Self> {
+        if LIVE_SHELLS.fetch_add(1, Ordering::AcqRel) >= MAX_LIVE_SHELLS {
+            LIVE_SHELLS.fetch_sub(1, Ordering::AcqRel);
+            None
+        } else {
+            Some(ShellSlot)
+        }
+    }
+}
+
+impl Drop for ShellSlot {
+    fn drop(&mut self) {
+        LIVE_SHELLS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// Serving one SSH connection failed.
 #[derive(Debug, thiserror::Error)]
@@ -106,6 +142,13 @@ impl Shell {
             let _ = session.channel_failure(id);
             return Ok(());
         };
+        // Reserve a concurrent-shell slot BEFORE opening a pty or spawning: at the node's cap, refuse
+        // rather than let a flood exhaust the host. The slot releases on any early return below, and is
+        // moved into the serving task so it lives exactly as long as the shell.
+        let Some(slot) = ShellSlot::acquire() else {
+            let _ = session.channel_failure(id);
+            return Ok(());
+        };
         let (pty, pts) = match pty_process::open() {
             Ok(pair) => pair,
             Err(_) => {
@@ -140,6 +183,8 @@ impl Shell {
         let handle = session.handle();
         session.channel_success(id)?;
         tokio::spawn(async move {
+            // Hold the shell slot for the child's whole lifetime; it releases when this task ends.
+            let _slot = slot;
             // Splice the ssh channel to the pty: channel input -> shell, shell output -> channel. Take the
             // `'static` writer before the borrowing reader.
             let writer = channel.make_writer();
@@ -259,5 +304,44 @@ fn is_root() -> bool {
     #[cfg(not(unix))]
     {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_slots_are_capped_and_released() {
+        // Reserve the whole ceiling; the next reservation is refused (the fork-bomb guard).
+        let mut slots: Vec<ShellSlot> = Vec::new();
+        for _ in 0..MAX_LIVE_SHELLS {
+            match ShellSlot::acquire() {
+                Some(slot) => slots.push(slot),
+                None => panic!("reservations under the cap must succeed"),
+            }
+        }
+        assert!(
+            ShellSlot::acquire().is_none(),
+            "at the cap, a new shell is refused"
+        );
+        // Releasing one frees exactly one slot, then the cap holds again.
+        slots.pop();
+        match ShellSlot::acquire() {
+            Some(freed) => {
+                assert!(
+                    ShellSlot::acquire().is_none(),
+                    "still capped after taking the freed slot"
+                );
+                drop(freed);
+            }
+            None => panic!("a released slot must reopen"),
+        }
+        drop(slots);
+        assert_eq!(
+            LIVE_SHELLS.load(Ordering::Acquire),
+            0,
+            "every slot released"
+        );
     }
 }
