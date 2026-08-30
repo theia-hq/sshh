@@ -11,9 +11,12 @@ and goes straight to a shell in a pty. This is the same shape as Tailscale SSH, 
 behind the WireGuard tunnel.
 
 The contract is enforced by the type system, not left to good intentions. `serve()` demands a
-`nauthy::Admitted` witness: an un-forgeable proof that a gate has authorized this exact peer for this
-exact service. You cannot call `serve()` without one, so a keyless shell can never be handed out
-un-gated by accident.
+`nauthy::Admitted` witness: an opaque token a gate hands back only on a successful admit, with no public
+constructor. You cannot fabricate one, so you cannot call `serve()` without having run a gate first, and a
+keyless shell can never be handed out un-gated by accident. Note what the witness does and does not prove:
+it proves a gate admitted a peer, but it carries no peer or service inside it, so it is the caller's job to
+serve it on the very stream the gate just authorized. tightbeam does exactly that (it admits and serves on
+one stream, inches apart), which is why the guarantee holds in practice.
 
 ```rust
 // `admitted` is a gate's proof it authorized this peer; `writer`/`reader` are the two halves of the
@@ -58,8 +61,12 @@ A shell has no login of its own, so everything rests on the stream being pre-aut
   hand every caller a root shell. `serve()` returns an error rather than serve as root.
 - **The host key is stable.** It is derived from the node's own identity, so a client's `known_hosts`
   pins the machine you dial and detects a later swap, instead of showing a fresh-key warning every time.
-- **A revoked capability is refused.** Once the granting capability no longer verifies, the connection
-  never reaches the shell.
+- **A revoked capability is refused at connect.** The gate checks revocation when a session opens, so a
+  revoked cap cannot start a new shell. Know the limit: it does NOT cut a session already in progress. The
+  recall story is revoke plus a short cap TTL, not mid-session eviction.
+- **One shell, one user: everyone admitted lands as this process's user.** There is no per-peer account
+  mapping, so a delegated slip is trust to run a shell as this user, not a sandboxed guest. Scope what you
+  delegate accordingly (short TTL, one service), and run the host unprivileged (it refuses root anyway).
 
 ## Not yet
 
