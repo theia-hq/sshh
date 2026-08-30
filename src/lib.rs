@@ -1,4 +1,4 @@
-//! `sshh` — a keyless SSH server over an already-authenticated byte stream.
+//! `sshh`: a keyless SSH server over an already-authenticated byte stream.
 //!
 //! theia's equivalent of Tailscale SSH. The caller hands [`serve`] one stream that a capability-gated
 //! overlay has ALREADY mutually authenticated (QUIC + raw-public-key TLS, addressed by ed25519 node id)
@@ -37,7 +37,7 @@ const MAX_LIVE_SHELLS: usize = 64;
 static LIVE_SHELLS: AtomicUsize = AtomicUsize::new(0);
 
 /// An RAII reservation of one concurrent-shell slot. Held for the shell's whole lifetime (moved into the
-/// serving task) and released on drop — including every early return before the task is spawned — so the
+/// serving task) and released on drop (including every early return before the task is spawned), so the
 /// count can never leak a slot and wedge the cap shut.
 struct ShellSlot;
 
