@@ -39,12 +39,12 @@ can drive it. In theia, two crates compose it:
 - [nauthy](https://github.com/theia-hq/nauthy) is the gate. It verifies a presented capability and, on
   success, returns an `Admitted` witness for that peer and service. That witness is the key that unlocks
   `serve()`.
-- [tightbeam](https://github.com/theia-hq/tightbeam) is the exposer. `tightbeam expose ssh=sshd:` runs the
+- [tightbeam](https://github.com/theia-hq/tightbeam) is the exposer. `tightbeam serve ssh=sshd:` runs the
   accept loop: for each connection it gates the stream through nauthy, takes the `Admitted`, and calls
   `sshh::serve` with it. A capability holder then reaches the shell with a normal ssh client, no ssh key
   involved. It lives behind tightbeam's `ssh` feature.
 
-So a real deployment reads as `tightbeam expose ssh=sshd:` (gated to your signet by default), but that is
+So a real deployment reads as `tightbeam serve ssh=sshd:` (gated to your signet by default), but that is
 one example, not a dependency: hand `serve()` an authenticated stream and an `Admitted` from any gate and
 you have keyless SSH. You never point sshh at a socket yourself.
 
