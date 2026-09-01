@@ -1,5 +1,9 @@
 # sshh
 
+> Archived: folded into [swoosh](https://github.com/theia-hq/swoosh) as the in-workspace crate
+> `crates/sshh`. It had one consumer (swoosh, behind the `ssh` feature); it now lives beside the CLI that
+> injects it. Nothing to install here.
+
 An SSH server with no ssh keys to manage. You hand it one byte stream that has already been
 authenticated, and it runs a real SSH session over it: a standard `ssh` or `scp` client gets a shell, and
 nobody sets up or rotates an ssh key.
